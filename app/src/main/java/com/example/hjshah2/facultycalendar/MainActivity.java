@@ -1,8 +1,5 @@
 package com.example.hjshah2.facultycalendar;
 
-import android.support.v7.app.AppCompatActivity;
-import android.os.Bundle;
-
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.api.client.extensions.android.http.AndroidHttp;
@@ -36,15 +33,13 @@ import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.text.method.ScrollingMovementMethod;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.sql.Time;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import pub.devrel.easypermissions.AfterPermissionGranted;
 import pub.devrel.easypermissions.EasyPermissions;
@@ -54,6 +49,11 @@ public class MainActivity extends Activity
     GoogleAccountCredential mCredential;
     private TextView mOutputText;
     private Button mCallApiButton;
+    private Button mEventInputButton;
+    private Button mUpdateCalendarButton;
+    private ArrayList<FilledTimes> filledTimes;
+    private long startQueryTime;
+    private long endQueryTime;
     ProgressDialog mProgress;
 
     static final int REQUEST_ACCOUNT_PICKER = 1000;
@@ -61,9 +61,16 @@ public class MainActivity extends Activity
     static final int REQUEST_GOOGLE_PLAY_SERVICES = 1002;
     static final int REQUEST_PERMISSION_GET_ACCOUNTS = 1003;
 
-    private static final String BUTTON_TEXT = "Call Google Calendar API";
-    private static final String PREF_ACCOUNT_NAME = "ssana675@gmail.com";
-    private static final String[] SCOPES = { CalendarScopes.CALENDAR_READONLY };
+    private final int START_DAYS_AHEAD = 1;
+    private final int END_DAYS_AHEAD = 8;
+    private final int WAKEUP_TIME = 8;
+    private final int SLEEP_TIME = 22;
+
+
+    static final String PREFERENCES = "pref";
+
+    private static final String PREF_ACCOUNT_NAME = "accountName";
+    private static final String[] SCOPES = { CalendarScopes.CALENDAR };
 
     /**
      * Create the main activity.
@@ -72,20 +79,9 @@ public class MainActivity extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        LinearLayout activityLayout = new LinearLayout(this);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT);
-        activityLayout.setLayoutParams(lp);
-        activityLayout.setOrientation(LinearLayout.VERTICAL);
-        activityLayout.setPadding(16, 16, 16, 16);
+        setContentView(R.layout.activity_main_activity);
 
-        ViewGroup.LayoutParams tlp = new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-
-        mCallApiButton = new Button(this);
-        mCallApiButton.setText(BUTTON_TEXT);
+        mCallApiButton = (Button) findViewById(R.id.callApiButton);
         mCallApiButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -93,23 +89,43 @@ public class MainActivity extends Activity
                 mOutputText.setText("");
                 getResultsFromApi();
                 mCallApiButton.setEnabled(true);
+                mUpdateCalendarButton.setEnabled(true);
             }
         });
-        activityLayout.addView(mCallApiButton);
 
-        mOutputText = new TextView(this);
-        mOutputText.setLayoutParams(tlp);
+        mEventInputButton = (Button) findViewById(R.id.inputTasksButton);
+        mEventInputButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openTasks(v);
+            }
+        });
+
+        mUpdateCalendarButton = (Button) findViewById(R.id.updateCalendarButton);
+        mUpdateCalendarButton.setEnabled(false);
+        mUpdateCalendarButton.setOnClickListener(new View.OnClickListener()
+        {
+            @Override
+            public void onClick(View v) {
+                mUpdateCalendarButton.setEnabled(false);
+                mOutputText.setText("");
+                addCalendarEvents(v);
+            }
+        });
+
+        filledTimes = new ArrayList<>();
+        startQueryTime = getDayFromTodayInMs(START_DAYS_AHEAD);
+        endQueryTime = getDayFromTodayInMs(END_DAYS_AHEAD);
+
+        mOutputText = (TextView) findViewById(R.id.textView);
         mOutputText.setPadding(16, 16, 16, 16);
         mOutputText.setVerticalScrollBarEnabled(true);
         mOutputText.setMovementMethod(new ScrollingMovementMethod());
         mOutputText.setText(
-                "Click the \'" + BUTTON_TEXT +"\' button to test the API.");
-        activityLayout.addView(mOutputText);
+                "Click the \'" + mCallApiButton.getText() +"\' button to test the API.");
 
         mProgress = new ProgressDialog(this);
         mProgress.setMessage("Calling Google Calendar API ...");
-
-        setContentView(activityLayout);
 
         // Initialize credentials and service object.
         mCredential = GoogleAccountCredential.usingOAuth2(
@@ -117,6 +133,126 @@ public class MainActivity extends Activity
                 .setBackOff(new ExponentialBackOff());
     }
 
+    public void openTasks(View view)
+    {
+        Intent intent = new Intent(this, EventInput.class);
+        startActivity(intent);
+    }
+
+    private long getDayFromTodayInMs(int day)
+    {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        int year  = cal.get(java.util.Calendar.YEAR);
+        int month = cal.get(java.util.Calendar.MONTH);
+        int date  = cal.get(java.util.Calendar.DATE);
+        cal.clear();
+        cal.set(year, month, date);
+        return cal.getTimeInMillis()+TimeUnit.DAYS.toMillis(day);
+    }
+
+    private ArrayList<CalendarActivity> getSavedActivities()
+    {
+        ArrayList<CalendarActivity> activityList = new ArrayList<>();
+        SharedPreferences prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE);
+        for(int i= 0; i<prefs.getInt("numEntries",0); i++)
+        {
+            activityList.add(new CalendarActivity(prefs.getString("item"+Integer.toString(i)+"name", null),
+                    prefs.getInt("item"+Integer.toString(i)+"hours", 0),
+                    prefs.getString("item"+Integer.toString(i)+"days", null)));
+        }
+        return activityList;
+    }
+
+    private ArrayList<CalendarEvent> generateCalendarEvents(long startDay, long endDay, long startTime, long endTime,
+                                                            ArrayList<CalendarActivity> calendarActivites,
+                                                            ArrayList<FilledTimes> fTimes)
+    {
+        if(calendarActivites==null || calendarActivites.size()==0)
+            return new ArrayList<>();
+        boolean occupiedTime[] = new boolean[(int)TimeUnit.MILLISECONDS.toHours(endDay-startDay)];
+        for(int i=0; i<(int)TimeUnit.MILLISECONDS.toDays(endDay-startDay);i++) {
+            long d = startDay+TimeUnit.DAYS.toMillis(i);
+            fTimes.add(new FilledTimes(d, d + startTime));
+            fTimes.add(new FilledTimes(d + endTime, d+TimeUnit.DAYS.toMillis(1)));
+        }
+        for(FilledTimes f : fTimes)
+        {
+            int beginIndex = (int)TimeUnit.MILLISECONDS.toHours(f.getStart()-startDay);
+            if(beginIndex<0)
+                beginIndex=0;
+            int endIndex = (int)TimeUnit.MILLISECONDS.toHours(f.getEnd()-1-startDay)+1;
+            if(endIndex>occupiedTime.length)
+                endIndex=occupiedTime.length;
+            for(int i=beginIndex; i<endIndex; i++)
+            {
+                occupiedTime[i]=true;
+            }
+        }
+        ArrayList<CalendarEvent> list = new ArrayList<>();
+        int i = 0;
+        int arrayListIndex=0;
+        int hoursRemaining=calendarActivites.get(arrayListIndex).getHours();
+        while(i<occupiedTime.length)
+        {
+            if(!occupiedTime[i])
+            {
+                if (hoursRemaining > 0)
+                {
+                    long start = startDay+ TimeUnit.HOURS.toMillis(i);
+                    if(list.size()>0 && list.get(list.size()-1).getName()
+                            .equals(calendarActivites.get(arrayListIndex).getName())
+                            && startDay+TimeUnit.HOURS.toMillis(i)==list.get(list.size()-1).getEndTime())
+                    {
+                        start = list.get(list.size()-1).getStartTime();
+                        list.remove(list.size()-1);
+                    }
+                    list.add(new CalendarEvent(calendarActivites.get(arrayListIndex).getName(),
+                            start,
+                            startDay+TimeUnit.HOURS.toMillis(i+1)));
+                    hoursRemaining--;
+                }
+                else if (arrayListIndex<calendarActivites.size()-1)
+                {
+                    arrayListIndex++;
+                    hoursRemaining=calendarActivites.get(arrayListIndex).getHours();
+                    list.add(new CalendarEvent(calendarActivites.get(arrayListIndex).getName(),
+                            startDay+TimeUnit.HOURS.toMillis(i),
+                            startDay+TimeUnit.HOURS.toMillis(i+1)));
+                    hoursRemaining--;
+                }
+                else
+                    break;
+            }
+            i++;
+        }
+        return list;
+    }
+
+    public void addCalendarEvents(View v)
+    {
+        startQueryTime = getDayFromTodayInMs(START_DAYS_AHEAD);
+        endQueryTime = getDayFromTodayInMs(END_DAYS_AHEAD);
+        addCalendarEvents(generateCalendarEvents(startQueryTime,
+                endQueryTime,
+                TimeUnit.HOURS.toMillis(WAKEUP_TIME),
+                TimeUnit.HOURS.toMillis(SLEEP_TIME),
+                getSavedActivities(),
+                filledTimes
+        ));
+    }
+
+    private void addCalendarEvents(ArrayList<CalendarEvent> list)
+    {
+        if (! isGooglePlayServicesAvailable()) {
+            acquireGooglePlayServices();
+        } else if (mCredential.getSelectedAccountName() == null) {
+            chooseAccount();
+        } else if (! isDeviceOnline()) {
+            mOutputText.setText("No network connection available.");
+        } else {
+            new UpdateCalendarTask(mCredential, list).execute();
+        }
+    }
 
 
     /**
@@ -330,7 +466,7 @@ public class MainActivity extends Activity
             JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
             mService = new com.google.api.services.calendar.Calendar.Builder(
                     transport, jsonFactory, credential)
-                    .setApplicationName("Google Calendar API Android Quickstart")
+                    .setApplicationName("ScheduleOptimizer")
                     .build();
         }
 
@@ -356,16 +492,17 @@ public class MainActivity extends Activity
          */
         private List<String> getDataFromApi() throws IOException {
             // List the next 10 events from the primary calendar.
-            DateTime now = new DateTime(System.currentTimeMillis());
+
             List<String> eventStrings = new ArrayList<String>();
             Events events = mService.events().list("primary")
-                    .setMaxResults(10)
-                    .setTimeMin(now)
+                    .setMaxResults(500)
+                    .setTimeMin(new DateTime(startQueryTime))
+                    .setTimeMax(new DateTime(endQueryTime))
                     .setOrderBy("startTime")
                     .setSingleEvents(true)
                     .execute();
             List<Event> items = events.getItems();
-
+            ArrayList<FilledTimes> tempArrayList = new ArrayList<>();
             for (Event event : items) {
                 DateTime start = event.getStart().getDateTime();
                 if (start == null) {
@@ -373,9 +510,13 @@ public class MainActivity extends Activity
                     // the start date.
                     start = event.getStart().getDate();
                 }
+                else
+                    tempArrayList.add(new FilledTimes(event.getStart().getDateTime().getValue(),
+                            event.getEnd().getDateTime().getValue()));
                 eventStrings.add(
                         String.format("%s (%s)", event.getSummary(), start));
             }
+            filledTimes = tempArrayList;
             return eventStrings;
         }
 
@@ -393,6 +534,101 @@ public class MainActivity extends Activity
                 mOutputText.setText("No results returned.");
             } else {
                 output.add(0, "Data retrieved using the Google Calendar API:");
+                mOutputText.setText(TextUtils.join("\n", output));
+            }
+        }
+
+        @Override
+        protected void onCancelled() {
+            mProgress.hide();
+            if (mLastError != null) {
+                if (mLastError instanceof GooglePlayServicesAvailabilityIOException) {
+                    showGooglePlayServicesAvailabilityErrorDialog(
+                            ((GooglePlayServicesAvailabilityIOException) mLastError)
+                                    .getConnectionStatusCode());
+                } else if (mLastError instanceof UserRecoverableAuthIOException) {
+                    startActivityForResult(
+                            ((UserRecoverableAuthIOException) mLastError).getIntent(),
+                            MainActivity.REQUEST_AUTHORIZATION);
+                } else {
+                    mOutputText.setText("The following error occurred:\n"
+                            + mLastError.getMessage());
+                }
+            } else {
+                mOutputText.setText("Request cancelled.");
+            }
+        }
+    }
+    private class UpdateCalendarTask extends AsyncTask<Void, Void, List<String>> {
+        private com.google.api.services.calendar.Calendar mService = null;
+        private ArrayList<CalendarEvent> eventList = null;
+        private Exception mLastError = null;
+
+        UpdateCalendarTask(GoogleAccountCredential credential, ArrayList<CalendarEvent> eList) {
+            HttpTransport transport = AndroidHttp.newCompatibleTransport();
+            JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
+            mService = new com.google.api.services.calendar.Calendar.Builder(
+                    transport, jsonFactory, credential)
+                    .setApplicationName("ScheduleOptimizer")
+                    .build();
+            eventList = eList;
+        }
+
+        /**
+         * Background task to call Google Calendar API.
+         * @param params no parameters needed for this task.
+         */
+        @Override
+        protected List<String> doInBackground(Void... params) {
+            try {
+                return updateCalendar();
+            } catch (Exception e) {
+                mLastError = e;
+                cancel(true);
+                return null;
+            }
+        }
+
+        /**
+         * Fetch a list of the next 10 events from the primary calendar.
+         * @return List of Strings describing returned events.
+         * @throws IOException
+         */
+        private List<String> updateCalendar() throws IOException {
+            List<String> eventStrings = new ArrayList<>();
+
+            for (CalendarEvent e : eventList) {
+                Event event = new Event().setSummary(e.getName());
+                DateTime startDateTime = new DateTime(e.getStartTime());
+                EventDateTime start = new EventDateTime()
+                        .setDateTime(startDateTime);
+                event.setStart(start);
+
+                DateTime endDateTime = new DateTime(e.getEndTime());
+                EventDateTime end = new EventDateTime()
+                        .setDateTime(endDateTime);
+                event.setEnd(end);
+                mService.events().insert("primary", event).execute();
+                eventStrings.add(
+                        String.format("%s (%s)(%s)", event.getSummary(), start.toString(), end.toString()));
+            }
+            return eventStrings;
+        }
+
+
+        @Override
+        protected void onPreExecute() {
+            mOutputText.setText("");
+            mProgress.show();
+        }
+
+        @Override
+        protected void onPostExecute(List<String> output) {
+            mProgress.hide();
+            if (output == null || output.size() == 0) {
+                mOutputText.setText("No results returned.");
+            } else {
+                output.add(0, "Data sent using the Google Calendar API:");
                 mOutputText.setText(TextUtils.join("\n", output));
             }
         }
