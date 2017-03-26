@@ -79,7 +79,7 @@ public class MainActivity extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main_activity);
+        setContentView(R.layout.activity_main);
 
         mCallApiButton = (Button) findViewById(R.id.callApiButton);
         mCallApiButton.setOnClickListener(new View.OnClickListener() {
