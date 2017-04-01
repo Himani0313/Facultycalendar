@@ -9,14 +9,13 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="ScheduleOptimizer"
+        android:label="Facultycalendar"
         android:theme="@style/AppTheme">
         <activity
             android:name="com.example.hjshah2.facultycalendar.MainActivity"
-            android:label="ScheduleOptimizer">
+            android:label="Facultycalendar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
